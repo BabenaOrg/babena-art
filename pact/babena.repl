@@ -1,0 +1,1104 @@
+(begin-tx)
+(load "root/fungible-v2.pact")
+ (load "root/gas-payer-v1.pact")
+(load "root/coin.pact")
+
+(define-namespace 'kip (sig-keyset) (sig-keyset))
+
+(load "kip/account-protocols-v1.pact")
+(load "kip/manifest.pact")
+(load "kip/token-policy-v1.pact")
+(load "kip/poly-fungible-v2.pact")
+
+(define-namespace 'util (sig-keyset) (sig-keyset))
+(load "util/fungible-util.pact")
+(load "util/guard.pact")
+(define-namespace 'free (sig-keyset) (sig-keyset))
+(commit-tx)
+
+(begin-tx "Loaded priv-sale contract")
+(env-data {
+  'upgrade: false,
+  'babena-keyset: [],
+  'ns: "free",
+  'babena-ops: {"keys":["ops"], "pred": "keys-all"},
+  'accounts: ["asd", "asd2", "pre-sale-user"]
+  })
+(load "priv-sale.pact")
+(commit-tx)
+
+(begin-tx "Set price")
+(describe-keyset 'babena-keyset)
+(use free.babena-pre-sale)
+(describe-keyset 'babena-ops)
+; (env-sigs [{
+;   'key: 'babena-ops,
+;   'caps:[(babena-pre-sale.OPS)]
+;   }])
+(update-sale-price 6.6)
+(get-sale-price)
+(commit-tx)
+
+(begin-tx)
+(test-capability (coin.COINBASE))
+(env-data {
+  'pre-sale-user-guard: {"keys":["pre-sale-user"], "pred": "keys-all"}
+  })
+(expect "coinbase pre-sale-user" "Write succeeded"
+ (coin.coinbase "pre-sale-user" (read-msg 'pre-sale-user-guard) 120.0))
+
+(expect "pre-sale-user is credited coins"
+ 120.0
+ (coin.get-balance 'pre-sale-user))
+(commit-tx)
+
+(begin-tx)
+(test-capability (coin.COINBASE))
+(env-data {
+  'pre-sale-user2-guard: {"keys":["pre-sale-user2"], "pred": "keys-all"}
+  })
+(expect "coinbase pre-sale-user2" "Write succeeded"
+ (coin.coinbase "pre-sale-user2" (read-msg 'pre-sale-user2-guard) 62.0))
+
+(expect "pre-sale-user2 is credited coins"
+ 62.0
+ (coin.get-balance 'pre-sale-user2))
+(commit-tx)
+
+(begin-tx)
+(use free.babena-pre-sale)
+(use util.guards)
+(env-chain-data {"block-time": (parse-time "%F" "2022-03-21")})
+(chain-data)
+; (enforce-guard (after-date (time "2022-03-24T00:00:00Z")))
+(env-sigs [{
+  'key: 'pre-sale-user,
+  'caps:[(coin.TRANSFER "pre-sale-user" "babena-bank" 10.0)]
+  }])
+(expect-failure "Reserving 1 token"
+  "Sale Not Started"
+  (reserve "pre-sale-user" 10.0 1))
+(get-sale-price)
+(get-accounts)
+(env-chain-data {"block-time": (parse-time "%F" "2022-05-15")})
+(expect "Reserving 1 token"
+  "pre-sale-user reserved BABENA with 6.6 KDA"
+  (reserve "pre-sale-user" 6.6 1))
+; (expect "Reserving 1 token"
+;     "pre-sale-user reserved BABENA with 6.6 KDA"
+;     (reserve "pre-sale-user2" 6.6 1))
+(commit-tx)
+
+(begin-tx)
+(use free.babena-pre-sale)
+(env-chain-data {"block-time": (parse-time "%F" "2022-05-16")})
+(env-sigs [{
+  'key: 'pre-sale-user2,
+  'caps:[(coin.TRANSFER "pre-sale-user2" "babena-bank" 13.2)]
+  }])
+(expect-failure "Reserving 3 token fails since max per pre-sale-user is 2"
+  "You can buy only 2 tokens"
+  (reserve "pre-sale-user2" 19.8 3))
+
+(expect-failure "Reserving 2 token fails since wrong kda amount"
+  "Invalid KDA/Babena amount 13.2 KDA and 2 Babena"
+  (reserve "pre-sale-user2" 33.0 2))
+
+(expect-failure "Reserving 2 token fails since wrong kda amount"
+  "Invalid KDA/Babena amount 13.2 KDA and 2 Babena"
+  (reserve "pre-sale-user2" 13.0 2))
+
+(expect "Reserving 2 tokens success"
+  "pre-sale-user2 reserved BABENA with 13.2 KDA"
+  (reserve "pre-sale-user2" 13.2 2))
+
+(commit-tx)
+
+(begin-tx)
+(use free.babena-pre-sale)
+(env-chain-data {"block-time": (parse-time "%F" "2022-05-16")})
+(env-sigs [{
+  'key: 'pre-sale-user,
+  'caps:[(coin.TRANSFER "pre-sale-user" "babena-bank" 6.6)]
+  }])
+
+(expect "Reserving 1 tokens success"
+"pre-sale-user reserved BABENA with 6.6 KDA"
+(reserve "pre-sale-user" 6.6 1))
+(expect-failure "Reserving 2 tokens fails since max per pre-sale-user reached"
+  "You can buy only 2 tokens"
+  (reserve "pre-sale-user" 6.6 1))
+
+(expect-failure "Reserving 2 tokens fails since max supply reached"
+  "Reachecd maximum supply 5.0 for private-sale"
+  (reserve "pre-sale-user" 13.2 2))
+
+(commit-tx)
+
+(begin-tx)
+(use free.babena-pre-sale)
+(env-data {
+  'time: { "time": "2022-06-02T16:30:00Z"}
+  })
+(env-chain-data {"block-time": (parse-time "%F" "2022-06-16")})
+(expect-failure "Reserving 5 token but fails since end time reached"
+  (format "Chain time must be before {}" [(read-msg 'time)])
+  (reserve "pre-sale-user2" 10.0 5))
+(expect "Total reserved is 30 KDA and total babena bought 3"
+  [26.4 4.0]
+  [(get-total-kda-reserved) (get-total-babena-reserved)])
+(commit-tx)
+
+; (begin-tx)
+; (chain-data)
+; (commit-tx)
+; (begin-tx "Loaded sale contract")
+; (env-data {
+;   "upgrade": false,
+;   "tokens-list": ["asd", "asdasd", "asddg", "agtrg"]
+; })
+; (load "sale.pact")
+; (commit-tx)
+
+
+(begin-tx "Loaded ledger contract")
+(env-data
+ { 'babena-admin: []
+ , 'admin-wh: []
+ , 'ns: "free"
+ , 'upgrade: false })
+(load "token-array.pact")
+; (env-gasmodel "table")
+; (env-gaslimit 10000)
+(load "ledger.pact")
+; (env-gas)
+(commit-tx)
+
+(begin-tx "Loaded policy contract")
+(env-data
+ { 'babena-admin: []
+ , 'admin-wh: []
+ , 'ns: "free"
+ , 'upgrade: false })
+(load "babena-royalty-policy-pre-sale.pact")
+(commit-tx)
+
+;  ;; fungible test
+;  (begin-tx)
+;  (load "test/ledger-test-fungible.pact")
+;  (load "test/fungible.repl")
+;  (load "babena-royalty-policy.pact")
+;  (use kip.token-manifest)
+;  (env-data {'mint-guard: []
+;  , 'burn-guard: []
+;  , 'sale-guard: []
+;  , 'transfer-guard: [] })
+;  (free.babena-ledger.create-token
+;    TOKEN
+;    12
+;    (create-manifest (uri "text" "token") [])
+;    free.babena-royalty-policy)
+;  (test-capability (free.babena-ledger.CREDIT TOKEN FUNDER_ACCT))
+;  (expect "fund success" true
+;    (test-fund FUNDER_ACCT FUNDER_GUARD FUNDER_BALANCE))
+;  (commit-tx)
+
+(begin-tx "sale fixed-quote-policy-royalty setup")
+(env-hash (hash "fixed-quote-sale-royalty-tx1"))
+(use free.token-array)
+(use kip.token-manifest)
+(env-data {
+   'upgrade: false,
+   'creator: "creator",
+   'user: "user",
+   'user-ks: {"keys": ["user"], "pred": "keys-all"},
+   'creator-guard: {"keys": ["creator"], "pred": "keys-all"},
+   'mint-guard: {"keys": ["mint"], "pred": "keys-all"},
+   'bob-guard: {"keys": ["bob"], "pred": "keys-all"},
+   'holder-guard: {"keys": ["holder"], "pred": "keys-all"},
+   "token_spec": {
+     'fungible: coin,
+     'creator: "creator",
+     'creator-guard: {"keys": ["creator"], "pred": "keys-all"},
+     'owner: "creator",
+     "royalty-rate": 0.1
+     },
+     "tokens-list1": (getTokens),
+     "tokens-list": ["OnaCvrAsM53g1QOVaAFkw6DcGpQ6vWYn6tBL8stUFSA", "ypHr-r69c8ux1DcBn5RZiuX5oWYELwidXDnxNL9VT5I", "S4SMB4o64QzXe5rD3tbYtGCVoVbfn5a0OWUZD5JrQP4", "gD4YpDuxaTpA83_7Rdp1xXzdiYqmgjAv4No3VwxQs8M", "AILSceqfauxaTpA83_7Rdp1xXzdiYqmgjAv4No3Vwaffaa", "WXWtMhRIAiyZU7zuIdbAneIbvmy-eUoCq2CM1_kB4N0"],
+     "provenance": "asjnasf",
+     "collection": {
+      'name: "Babena",
+      'symbol: "BABENA",
+      'total-supply: 10000,
+      'creator: "collection",
+      'policy: free.babena-royalty-policy,
+      'guard: {"keys": ["collection"], "pred": "keys-all"},
+      'token: {
+          'id: "",
+          'manifest: (create-manifest (uri "text" "") []),
+          'precision: 0,
+          'supply: 1.0
+          ; 'policy: free.babena-royalty-policy
+          }
+          },
+     'public-sale-time: {"time": "1970-01-03T00:00:00Z"},
+     'royalty-receiver: "r-receiver",
+     'price-per-nft: 2.0,
+     'whitelist-price: 1.0,
+     "royalty-rate": 0.1,
+     'max-per-user: 2,
+     'total-supply: 6,
+     'total-supply1: 10000,
+     'max-per-wh: 1
+  })
+
+; (env-sigs
+;   [{'key:'dummy
+;    ,'caps:
+;     [(free.babena-ledger.MINT "user" 1.0)
+;      ]},
+;    { 'key: 'babena-admin
+;     ,'caps:[]
+;      }
+;    ])
+
+(expect "create creator account " "Write succeeded"
+  (coin.create-account "creator" (read-keyset 'creator-guard) ))
+
+(expect "create user account " "Write succeeded"
+(coin.create-account "user" (read-keyset 'user-ks) ))
+
+ (test-capability (coin.COINBASE))
+
+   (expect "coinbase buyer" "Write succeeded"
+   (coin.coinbase "user" (read-keyset 'user-ks) 10.0))
+
+   (expect "create user account " "Write succeeded"
+   (coin.create-account "user1" (read-keyset 'user-ks) ))
+
+    (test-capability (coin.COINBASE))
+
+      (expect "coinbase buyer" "Write succeeded"
+      (coin.coinbase "user1" (read-keyset 'user-ks) 2.0))
+
+(commit-tx)
+
+(begin-tx)
+  ;  (expect "create holder account " "Write succeeded"
+  ;  (coin.create-account "demo-nft-holder" (read-keyset 'holder-guard) ))
+(use kip.token-manifest)
+(use free.babena-ledger)
+
+(use free.babena-royalty-policy)
+
+(expect-failure "Tokens supply mismatch"
+"Total-supply and tokens-list length does not match"
+(initialize
+  (read-msg 'provenance)
+  (read-msg 'tokens-list1)
+  (read-msg 'creator)
+  (read-integer 'total-supply)
+  (read-integer 'max-per-user)
+  (read-integer 'max-per-wh)
+  (read-msg 'public-sale-time)
+  (read-msg 'royalty-receiver)
+  (read-msg 'royalty-rate)
+  (read-msg 'price-per-nft)
+  (read-msg 'whitelist-price))
+)
+
+(env-gasmodel "table")
+(env-gaslimit 100000000)
+(initialize
+  (read-msg 'provenance)
+  (read-msg 'tokens-list)
+  (read-msg 'creator)
+  (read-integer 'total-supply)
+  (read-integer 'max-per-user)
+  (read-integer 'max-per-wh)
+  (read-msg 'public-sale-time)
+  (read-msg 'royalty-receiver)
+  (read-msg 'royalty-rate)
+  (read-msg 'price-per-nft)
+  (read-msg 'whitelist-price))
+  (env-gas)
+(expect-failure "Collection Babena was not created"
+  "Collection Not found"
+  (create-token "Babena Dummy" 1
+    (create-manifest (uri "text" "Dummy token-uri") []) free.babena-royalty-policy "Babena"))
+;
+; (expect "Create token project-3"
+;   "Write succeeded"
+;   (create-token "Babena #3" 1
+;     (create-manifest (uri "text" "project-3-uri") []) free.babena-royalty-policy))
+;
+; (expect "Create token project-3"
+;   "Write succeeded"
+;   (create-token "Babena #2" 1
+;     (create-manifest (uri "text" "project-3-uri") []) free.babena-royalty-policy))
+;
+; (expect "Create token project-3"
+;   "Write succeeded"
+;   (create-token "Babena #4" 1
+;     (create-manifest (uri "text" "project-3-uri") []) free.babena-royalty-policy))
+
+(expect "Create token Collection"
+  true
+  (create-collection (read-msg 'collection)))
+
+(expect "Create token events"
+  [{"name": "free.babena-ledger.COLLECTION","params": [(read-msg 'collection)]}]
+    (map (remove 'module-hash) (env-events true)))
+
+(env-sigs
+  [{'key:'whitelist
+  ,'caps:[]}])
+
+(expect-failure "Non collection owner creates Token"
+  "Keyset failure"
+  (create-token "Babena:Dummy" 1
+    (create-manifest (uri "text" "Dummy token-uri") []) free.babena-royalty-policy "Babena"))
+
+(env-sigs
+  [{'key:'collection
+  ,'caps:[]}])
+
+; (expect "Collection owner creates Token"
+;   true
+;   (create-token "Babena:Dummy" 1
+;     (create-manifest (uri "text" "Dummy token-uri") []) free.babena-royalty-policy "Babena"))
+;
+; (expect "Create token events"
+;   [{"name": "free.babena-ledger.TOKEN","params": ["Babena:Dummy" 1 0.0 free.babena-royalty-policy]}]
+;     (map (remove 'module-hash) (env-events true)))
+    ; (bind (get-policy-info "Babena #3")
+    ; { 'policy := policy:module{token-policy-v1}
+    ; , 'token := token }
+    ; (get-policy token))
+
+;  (expect-failure "bob mints project-3"
+;    "Failed: Keyset failure (keys-all): [mint]"
+;    (babena-sale.sale 'project-3 "bob" (read-keyset 'bob-guard) 1.0))
+(commit-tx)
+
+; (begin-tx "Sale Statuss")
+; (use free.babena-royalty-policy)
+; (get-sale-status)
+; (commit-tx)
+
+(begin-tx "Sale Statuss")
+(use free.babena-royalty-policy)
+(check-whitelist)
+(commit-tx)
+
+(begin-tx "Add a user to whitelist")
+(use free.babena-royalty-policy)
+(env-chain-data {"block-time": (parse-time "%F" "1970-01-01")})
+(at 'block-time (chain-data))
+(env-data
+  {
+    ; 'admin-wh: {"keys": ["admin-wh"], "pred": "keys-all"},
+  'ns: "free"
+  , 'babena-admin: {"keys": ["babena-admin"], "pred": "keys-all"}
+  , 'wh: "whitelist"
+  , 'wh-guard: {"keys": ["whitelist"], "pred": "keys-all"}
+  , 'upgrade: false })
+(expect "create whitelist account" "Write succeeded"
+  (coin.create-account "whitelist" (read-keyset 'wh-guard) ))
+(expect "Add to whitelist"
+  "Write succeeded"
+  (add-whitelist "whitelist"))
+(commit-tx)
+
+(begin-tx "Claim reserved token")
+(use free.babena-ledger)
+(use free.babena-royalty-policy)
+
+(env-data {
+  'whitelist-ks: {"keys": ["whitelist"], "pred": "keys-all"},
+  'user-ks: {"keys": ["user"], "pred": "keys-all"},
+  'token1: "Babena:ypHr-r69c8ux1DcBn5RZiuX5oWYELwidXDnxNL9VT5I",
+  'token2: "Babena:WXWtMhRIAiyZU7zuIdbAneIbvmy-eUoCq2CM1_kB4N0",
+  'pre-sale-user-guard: {"keys":["pre-sale-user"], "pred": "keys-all"}
+})
+(env-sigs
+  [{'key:'whitelist
+    ,'caps:[(free.babena-ledger.MINT-BABENA "pre-sale-u" 1.0)
+  ]}])
+(expect-failure "You did not reserve any tokens in the pre-sale" (claim-reserved "pre-sale-u" (read-keyset 'whitelist-ks)))
+
+(env-sigs
+  [{'key:'whitelist
+    ,'caps:[(free.babena-ledger.MINT-BABENA "pre-sale-user" 1.0)
+  ]}])
+(expect-failure "Keyset failure (keys-all): [pre-sale...]" (claim-reserved "pre-sale-user" (read-keyset 'whitelist-ks)))
+(use free.babena-pre-sale)
+(read-reservation 'pre-sale-user)
+
+(env-keys ["pre-sale-user"])
+(let ( (reserved-guard:guard (at 'guard (read-reservation 'pre-sale-user))))
+; (= (read-keyset 'pre-sale-user-guard) reserved-guard))
+; (enforce (= (read-keyset 'pre-sale-user-guard) reserved-guard) "asd")
+(enforce-guard reserved-guard))
+(env-sigs
+  [{'key:"pre-sale-user"
+    ,'caps:[(free.babena-ledger.MINT-BABENA 'pre-sale-user 1.0), (free.babena-ledger.CLAIM-RESERVED 'pre-sale-user (read-keyset 'pre-sale-user-guard))]
+    }
+  ])
+(expect "Claimed reserved token" [true true] (claim-reserved 'pre-sale-user (read-keyset 'pre-sale-user-guard)))
+
+(expect "Create and mint fqp token EVENTS"
+  [{"name": "free.babena-ledger.MINT-BABENA","params": ["pre-sale-user" 1.0]},
+  {"name": "free.babena-ledger.ACCOUNT_GUARD","params": [(read-msg 'token1) "pre-sale-user" (read-keyset 'pre-sale-user-guard)]},
+  {"name": "free.babena-ledger.RECONCILE","params": [(read-msg 'token1) 1.0
+  { "account": "",
+    "current": 0.0,
+    "previous": 0.0
+  }  { "account": "pre-sale-user",
+    "current": 1.0,
+    "previous": 0.0
+    }]},
+    {"name": "free.babena-ledger.ACCOUNT_GUARD","params": [(read-msg 'token2) "pre-sale-user" (read-keyset 'pre-sale-user-guard)]},
+    {"name": "free.babena-ledger.RECONCILE","params": [(read-msg 'token2) 1.0
+    { "account": "",
+      "current": 0.0,
+      "previous": 0.0
+    }  { "account": "pre-sale-user",
+      "current": 1.0,
+      "previous": 0.0
+      }]}]
+  (map (remove 'module-hash) (env-events true)))
+
+(use free.babena-royalty-policy)
+  (expect "Minted Tokens will be 1 for pre-sale-user"
+    2
+    (get-account-minted "pre-sale-user")
+  )
+
+  (expect "Tokens available will be 4"
+    4
+    (get-current-length)
+  )
+(commit-tx)
+
+
+(begin-tx "Claim whitelisted token")
+(env-data
+  { 'admin-wh: {"keys": ["admin-wh"], "pred": "keys-all"}
+  , 'ns: "free"
+  , 'wh: "whitelist"
+  , 'wh-guard: {"keys": ["whitelist"], "pred": "keys-all"}
+  , 'guard: {"keys": ["cc572f03d8cfedf863f3c3bc5baeaf1f7f93c6806b3f0db3ec703d9d82b6e8d3"], "pred": "keys-all"}
+  , 'upgrade: false })
+  (expect "create whitelist account" "Write succeeded"
+  (coin.create-account "k:cc572f03d8cfedf863f3c3bc5baeaf1f7f93c6806b3f0db3ec703d9d82b6e8d3" (read-keyset 'guard) ))
+(test-capability (coin.COINBASE))
+
+  (expect "coinbase buyer" "Write succeeded"
+  (coin.coinbase "whitelist" (read-msg 'wh-guard) 2.0))
+(commit-tx)
+
+(begin-tx)
+(use free.babena-ledger)
+(env-data {
+  'whitelist-ks: {"keys": ["whitelist"], "pred": "keys-all"},
+  'user-ks: {"keys": ["user"], "pred": "keys-all"},
+  'token: "Babena:S4SMB4o64QzXe5rD3tbYtGCVoVbfn5a0OWUZD5JrQP4",
+  'pre-sale-user-guard: {"keys":["pre-sale-user"], "pred": "keys-all"}
+})
+
+(env-sigs
+  [{'key:'whitelist
+  ,'caps:
+  [(free.babena-ledger.MINT-BABENA "whitelist" 1.0)
+  (coin.TRANSFER "whitelist" "creator" 10.0)
+]}])
+; (get-accounts)
+(expect-failure "mint fails, whitelist can't mint with another guard"
+  "Guards doesn't match"
+  (free.babena-ledger.mint-bulk-babena "whitelist" (read-keyset 'user-ks) 1.0 "Babena" 1))
+  ;
+  ; (env-sigs
+  ;   [{'key:'whitelist
+  ;   ,'caps:
+  ;   [(free.babena-ledger.MINT-BABENA "user" 1.0)
+  ;   (coin.TRANSFER "user" "creator" 10.0)
+  ; ]}])
+  ; (expect-failure "mint fails, user can't mint with whitelist guard"
+  ;   "false"
+  ;   (free.babena-ledger.mint-bulk-babena 'user (read-keyset 'whitelist-ks) 1.0) "Babena")
+  (env-chain-data {"prev-block-hash": "Id4BZtrpwlpKAsQ_i9PD_sK6aWy5wJQKab0iuHAH9K8"})
+(env-sigs
+  [{'key:'whitelist
+    ,'caps:[(free.babena-ledger.MINT-BABENA "whitelist" 2.0)
+            (coin.TRANSFER "whitelist" "creator" 10.0)
+  ]}])
+(expect-failure "Amount must be 1"
+  "Amount must always be 1.0 for 1 for 1 NFTs"
+  (free.babena-ledger.mint-bulk-babena 'whitelist (read-keyset 'whitelist-ks) 2.0 "Babena" 1)
+)
+
+(env-sigs [{
+  'key: 'whitelist,
+  'caps: [(free.babena-ledger.MINT-BABENA "whitelist" 1.0)
+          (coin.TRANSFER "whitelist" "creator" 10.0)]
+  }])
+(expect "whitelist mints first time"
+  [true]
+  (free.babena-ledger.mint-bulk-babena 'whitelist (read-keyset 'whitelist-ks) 1.0 "Babena" 1)
+)
+  ; (expect "Minted token should not be in sale status"
+  ; false
+  ; (contains "OnaCvrAsM53g1QOVaAFkw6DcGpQ6vWYn6tBL8stUFSA" (at 'tokens-list (get-sale-status)))
+  ; )
+(commit-tx)
+
+(begin-tx "Claim whitelisted token again")
+(env-data
+  { 'admin-wh: {"keys": ["admin-wh"], "pred": "keys-all"}
+  , 'ns: "free"
+  , 'wh: "whitelist"
+  , 'wh-guard: {"keys": ["whitelist"], "pred": "keys-all"}
+  , 'guard: {"keys": ["cc572f03d8cfedf863f3c3bc5baeaf1f7f93c6806b3f0db3ec703d9d82b6e8d3"], "pred": "keys-all"}
+  , 'upgrade: false })
+(use free.babena-ledger)
+(use free.babena-royalty-policy)
+(get-whitelist-info 'whitelist)
+(env-data {
+  'whitelist-ks: {"keys": ["whitelist"], "pred": "keys-all"}
+  })
+
+(env-sigs
+  [{'key:'whitelist
+  ,'caps:
+  [(free.babena-ledger.MINT-BABENA "whitelist" 1.0)
+  (coin.TRANSFER "whitelist" "creator" 10.0)
+]}])
+(expect-failure "mint fails, wh limit reached"
+  "You have reached the whitelist claim limit"
+  (free.babena-ledger.mint-bulk-babena 'whitelist (read-keyset 'whitelist-ks) 1.0 "Babena" 1))
+
+(commit-tx)
+
+(begin-tx "Non-whitelist User mints before public-sale")
+(use free.babena-ledger)
+(use free.babena-royalty-policy)
+(env-data {
+  'user-ks: {"keys": ["user"], "pred": "keys-all"}
+  })
+ (env-sigs
+   [{'key:'user
+    ,'caps:
+     [(free.babena-ledger.MINT-BABENA "user" 1.0)
+     (coin.TRANSFER "user" "creator" 10.0)
+      ]}])
+ (expect-failure "You are not whitelisted"
+   "You are not whitelisted"
+   (free.babena-ledger.mint-bulk-babena 'user (read-keyset 'user-ks) 1.0 "Babena" 1)
+   )
+(commit-tx)
+
+(begin-tx "Mint First Token")
+(use free.babena-ledger)
+(use free.babena-royalty-policy)
+(env-chain-data { "prev-block-hash": "hBaw9rSzHEvmizycnT4f5PCgI4F8IOiDw", "chain-id": "TestNet00/2", "block-height": 20, "block-time": (parse-time "%F" "1970-01-03") })
+(env-data {
+  'user-ks: {"keys": ["user"], "pred": "keys-all"},
+  'token2: "Babena:AILSceqfauxaTpA83_7Rdp1xXzdiYqmgjAv4No3Vwaffaa",
+  'token: "Babena:OnaCvrAsM53g1QOVaAFkw6DcGpQ6vWYn6tBL8stUFSA"
+  })
+ (env-sigs
+   [{'key:'user
+    ,'caps:
+     [(free.babena-ledger.MINT-BABENA "user" 1.0)
+     (coin.TRANSFER "user" "creator" 4.0)
+      ]}])
+ (expect "user mints first time"
+   [true true]
+   (free.babena-ledger.mint-bulk-babena 'user (read-keyset 'user-ks) 1.0 "Babena" 2)
+   )
+
+ (expect "Create and mint fqp token EVENTS"
+   [{"name": "free.babena-ledger.MINT-BABENA","params": ["user" 1.0]},
+   {"name": "coin.TRANSFER","params": ["user" "creator" 2.0]},
+   {"name": "free.babena-ledger.ACCOUNT_GUARD","params": [(read-msg 'token) "user" (read-keyset 'user-ks)]},
+   {"name": "free.babena-ledger.RECONCILE","params": [(read-msg 'token) 1.0
+   { "account": "",
+     "current": 0.0,
+     "previous": 0.0
+   }  { "account": "user",
+     "current": 1.0,
+     "previous": 0.0
+     }]},
+   {"name": "coin.TRANSFER","params": ["user" "creator" 2.0]},
+   {"name": "free.babena-ledger.ACCOUNT_GUARD","params": [(read-msg 'token2) "user" (read-keyset 'user-ks)]},
+   {"name": "free.babena-ledger.RECONCILE","params": [(read-msg 'token2) 1.0
+   { "account": "",
+     "current": 0.0,
+     "previous": 0.0
+   }  { "account": "user",
+     "current": 1.0,
+     "previous": 0.0
+     }]}]
+   (map (remove 'module-hash) (env-events true)))
+
+(use free.babena-royalty-policy)
+   (expect "Tokens must be 1"
+     1
+     (get-current-length)
+   )
+
+  ; (expect "Minted token should not be in sale status"
+  ;    false
+  ;  (contains "OnaCvrAsM53g1QOVaAFkw6DcGpQ6vWYn6tBL8stUFSA" (at 'tokens-list (get-sale-status)))
+  ; )
+
+(commit-tx)
+
+(begin-tx)
+(use free.babena-royalty-policy)
+(expect "Pause the mint"
+"Write succeeded"
+(pause-mint))
+(get-mint-status)
+(commit-tx)
+
+(begin-tx)
+(use free.babena-ledger)
+(use free.babena-royalty-policy)
+(env-chain-data {"prev-block-hash": "a7PmSRrDFGUg8R7bEbhLOYw0gn_FqCdyekvRfK9xFBc"})
+(env-sigs
+  [{'key:'user
+   ,'caps:
+    [(free.babena-ledger.MINT-BABENA "user" 1.0)
+    (coin.TRANSFER "user" "creator" 2.0)
+     ]}])
+(expect-failure "user mints while mint is paused"
+  "MINT is paused or completed, can't mint now"
+  (free.babena-ledger.mint-bulk-babena 'user (read-keyset 'user-ks) 1.0 "Babena" 1))
+(commit-tx)
+
+(begin-tx)
+(use free.babena-royalty-policy)
+(expect "Resume Mint"
+"Write succeeded"
+(resume-mint))
+(get-mint-status)
+(commit-tx)
+
+(begin-tx "Mint Second Time")
+(use free.babena-ledger)
+(use free.babena-royalty-policy)
+(env-data {
+  'user-ks: {"keys": ["user"], "pred": "keys-all"},
+  'token: "Babena:gD4YpDuxaTpA83_7Rdp1xXzdiYqmgjAv4No3VwxQs8M"
+  })
+(env-chain-data {"prev-block-hash": "a7PmSRrDFGUg8R7bEbhLOYw0gn_FqCdyekvRfK9xFBc"})
+(env-sigs
+  [{'key:'user
+   ,'caps:
+    [(free.babena-ledger.MINT-BABENA "user1" 1.0)
+    (coin.TRANSFER "user1" "creator" 2.0)
+     ]}])
+(expect "user mints Second time"
+  [true]
+  (free.babena-ledger.mint-bulk-babena 'user1 (read-keyset 'user-ks) 1.0 "Babena" 1))
+
+(expect "Create and mint fqp token EVENTS"
+  [{"name": "free.babena-ledger.MINT-BABENA","params": ["user1" 1.0]}
+  {"name": "coin.TRANSFER","params": ["user1" "creator" 2.0]}
+  {"name": "free.babena-ledger.ACCOUNT_GUARD","params": [(read-msg 'token) "user1" (read-keyset 'user-ks)]}
+  {"name": "free.babena-ledger.RECONCILE","params": [(read-msg 'token) 1.0
+  { "account": "",
+    "current": 0.0,
+    "previous": 0.0
+  }  { "account": "user1",
+    "current": 1.0,
+    "previous": 0.0
+    }]}
+  ]
+    (map (remove 'module-hash) (env-events true)))
+
+(commit-tx)
+
+(begin-tx "Mint Third Time")
+(use free.babena-ledger)
+(use free.babena-royalty-policy)
+(env-sigs
+  [{'key:'user
+   ,'caps:
+    [(free.babena-ledger.MINT-BABENA "user" 1.0)
+    (coin.TRANSFER "user" "creator" 1.0)
+     ]}])
+(expect-failure "Reached total supply"
+  "Total supply of 6 reached"
+  (free.babena-ledger.mint-bulk-babena 'user (read-keyset 'user-ks) 1.0 "Babena" 1))
+(commit-tx)
+
+(begin-tx "Test RANDOM cap")
+(use free.babena-royalty-policy)
+(env-sigs
+  [{'key:'user
+   ,'caps:
+   [(free.babena-royalty-policy.MINT "user")
+    (coin.TRANSFER "user" "creator" 10.0)
+     ]}])
+     (expect-failure "not granted"
+     (get-random 'user))
+(commit-tx)
+
+(begin-tx "Deploy a sample contract with RANDOM and UPDATE-OWNER caps installed")
+(module as GOVERNANCE
+  (defcap GOVERNANCE () true)
+  (defun get-ran (account)
+  (install-capability (free.babena-royalty-policy.MINT account))
+    (install-capability (free.babena-royalty-policy.RANDOM))
+    (free.babena-royalty-policy.get-random account)
+  )
+
+  (defun up-own (id account)
+  (install-capability (free.babena-royalty-policy.UPDATE-OWNER id account))
+    (free.babena-royalty-policy.update-owner id account)
+  )
+
+)
+(commit-tx)
+;
+(begin-tx "Test RANDOM and UPDATE-OWNER caps from a contract")
+(use as)
+(expect-failure
+  "not granted"
+  (get-ran 'user))
+
+(expect-failure
+  "not granted"
+  (up-own "1" "user2"))
+(commit-tx)
+
+(begin-tx "Test update-owner cap")
+(use free.babena-royalty-policy)
+(env-sigs
+  [{'key:'user
+   ,'caps:
+   [(free.babena-royalty-policy.UPDATE-OWNER "1" "user")
+    (coin.TRANSFER "user" "creator" 10.0)
+     ]}])
+
+(expect-failure "not granted"
+(update-owner "Babena #1" "user2"))
+(commit-tx)
+
+(begin-tx "Create Token After Public Sale")
+(use free.babena-ledger)
+(use kip.token-manifest)
+(env-data {
+  "token_spec": {
+    'fungible: coin,
+    'creator: "creator",
+    'creator-guard: {"keys": ["creator"], "pred": "keys-all"},
+    'owner: "creator",
+    "royalty-rate": 1.0
+    },
+  'token: "Babena:OnaCvrAsM53g1QOVaAFkw6DcGpQ6vWYn6tBL8stUFSA"
+  })
+(env-sigs
+  [{'key:'collection
+  ,'caps:[]}])
+(expect "Create token project-3"
+  true
+  (create-token (read-msg 'token) 1
+    (create-manifest (uri "text" "project-3-uri") []) free.babena-royalty-policy "Babena"))
+
+(expect "Create token events"
+  [{"name": "free.babena-ledger.TOKEN","params": [(read-msg 'token) 1 0.0 free.babena-royalty-policy]}]
+    (map (remove 'module-hash) (env-events true)))
+(commit-tx)
+
+(begin-tx "Add whitelist after sal")
+(use free.babena-royalty-policy)
+(expect "Add to whitelist"
+  "Pre-mint for whitelist users ended, can't add users now"
+  (add-whitelist "whitelist"))
+(commit-tx)
+
+; (begin-tx)
+; (env-chain-data {"prev-block-hash": "asfjhbsdjvuyvsfg"})
+; (chain-data)
+; (commit-tx)
+
+
+(begin-tx "sale fixed-quote-policy-royalty success")
+(env-hash (hash "fixed-quote-policy-royalty-sale-tx2"))
+(use free.babena-ledger)
+
+(env-data {"alice": {"keys": ["alice"], "pred":"="}})
+(expect
+ "Create recipient account alice"
+ "Write succeeded"
+ (coin.create-account 'alice (read-keyset 'alice)))
+
+(env-data
+ {
+  "quote": {
+      "price": 10.0
+     ,"recipient": "user"
+     ,"recipient-guard": {"keys": ["user"], "pred":"keys-all"}
+   }
+ ,"buyer": "coin-buyer"
+ ,"buyer-guard": {"keys": ["buyer"], "pred": "keys-all"},
+ 'token: "Babena:OnaCvrAsM53g1QOVaAFkw6DcGpQ6vWYn6tBL8stUFSA"
+ })
+(env-chain-data {"block-height": 100})
+
+(test-capability (coin.COINBASE))
+
+(expect "coinbase buyer" "Write succeeded"
+ (coin.coinbase "coin-buyer" (read-msg 'buyer-guard) 12.0))
+
+(expect "coin-buyer is credited coins"
+ 12.0
+ (coin.get-balance 'coin-buyer))
+
+(env-sigs
+ [{'key:'user
+  ,'caps:
+   [(free.babena-ledger.OFFER (read-msg 'token) "user" 1.0 120)]}
+])
+
+(expect-failure "Sale fails before pre-mint complete"
+ "Pre-mint is not yet completed"
+ (sale (read-msg 'token) 'user 1.0 120))
+(commit-tx)
+(begin-tx)
+(use free.babena-royalty-policy)
+(expect "End mint"
+"Write succeeded"
+(end-mint))
+(commit-tx)
+(begin-tx)
+(use free.babena-ledger)
+(env-sigs
+ [{'key:'user
+  ,'caps:
+   [(free.babena-ledger.OFFER (read-msg 'token) "user" 1.0 120)]}
+])
+ (expect "Sale succeeds"
+  true
+  (sale (read-msg 'token) 'user 1.0 120))
+(expect "coin balance of coin-buyer is unchanged"
+ 12.0
+ (coin.get-balance 'coin-buyer))
+
+(expect "Seller is debited, sale account is credited Babena:OnaCvrAsM53g1QOVaAFkw6DcGpQ6vWYn6tBL8stUFSA"
+ [0.0 1.0]
+ (map (get-balance (read-msg 'token)) ['user (sale-account)]))
+
+(expect "OFFER events"
+  [{"name": "free.babena-ledger.OFFER","params": [(read-msg 'token) "user" 1.0 120]},
+   {"name": "free.babena-ledger.SALE","params": [(read-msg 'token) "user" 1.0 120 (pact-id)]},
+   {"name": "free.babena-royalty-policy.QUOTE","params": [(pact-id) (read-msg 'token) 1.0 10.0 10.0 1.000000000000 "creator" (read-msg "quote")]},
+   {"name": "free.babena-ledger.ACCOUNT_GUARD","params": [(read-msg 'token) (sale-account) (create-pact-guard "SALE")]},
+   {"name": "free.babena-ledger.TRANSFER","params": [(read-msg 'token) "user" (sale-account) 1.0]},
+   {"name": "free.babena-ledger.RECONCILE","params": [(read-msg 'token) 1.0
+   { "account": "user",
+     "current": 0.0,
+     "previous": 1.0
+   }  { "account": (sale-account),
+     "current": 1.0,
+     "previous": 0.0
+     }]}]
+ (map (remove 'module-hash) (env-events true)))
+
+
+(expect-failure "Withdraw fails before timeout"
+ "still active"
+ (continue-pact 0 true))
+
+(env-sigs [
+ {'key: 'user
+  ,'caps: [(free.babena-ledger.BUY (read-msg 'token) "user" "coin-buyer" 1.0 120 (hash "fixed-quote-policy-royalty-sale-tx2"))]
+ }
+,{'key: 'dummy
+,'caps: [
+  (coin.TRANSFER "coin-buyer" "user" 9.5)
+  (coin.TRANSFER "coin-buyer" "creator" 0.5)
+]}])
+
+(expect-failure "buy fails, buyer doesn't sign coin.TRANSFER"
+ "[buyer]"
+ (continue-pact 1))
+
+(env-sigs [
+ {'key: 'user
+  ,'caps: [(free.babena-ledger.BUY (read-msg 'token) "user" "coin-buyer" 1.0 120 (hash "fixed-quote-policy-royalty-sale-tx2"))]
+ }
+,{'key: 'buyer
+,'caps: [
+ (coin.TRANSFER "coin-buyer" "user" 9.0)
+ (coin.TRANSFER "coin-buyer" "creator" 1.0)
+ (free.babena-royalty-policy.BUY (read-msg 'token) "coin-buyer")
+]}])
+
+(map (coin.get-balance ) ['coin-buyer 'user 'creator])
+
+(expect "buy suceeds"
+ true
+ (continue-pact 1))
+
+(expect "Seller is debited, sale account is debited, buyer is credited on Babena:OnaCvrAsM53g1QOVaAFkw6DcGpQ6vWYn6tBL8stUFSA balance"
+ [0.0 0.0 1.0]
+ (map (get-balance (read-msg 'token)) ['user (sale-account) 'coin-buyer]))
+
+(expect "coin-buyer is debited on coin balance by price"
+ [2.000000000000 15.000000000000 8.000000000000]
+ (map (coin.get-balance ) ['coin-buyer 'user 'creator]))
+
+(expect-failure "Withdraw fails after sale completes"
+ (format "pact completed: {}" [(pact-id)])
+ (continue-pact 0 true))
+
+(expect "BUY events"
+  [{"name": "free.babena-ledger.BUY","params": [(read-msg 'token) "user" "coin-buyer" 1.0 120 (pact-id)]},
+   {"name": "coin.TRANSFER","params": ["coin-buyer" "creator" 1.000000000000]},
+   {"name": "coin.TRANSFER","params": ["coin-buyer" "user" 9.000000000000]},
+   {"name": "free.babena-ledger.ACCOUNT_GUARD","params": [(read-msg 'token) 'coin-buyer (read-keyset 'buyer-guard)]},
+   {"name": "free.babena-ledger.TRANSFER","params": [(read-msg 'token) (sale-account) "coin-buyer" 1.0]},
+   {"name": "free.babena-ledger.RECONCILE","params": [(read-msg 'token) 1.0
+   { "account": (sale-account),
+     "current": 0.0,
+     "previous": 1.0
+   }  { "account": "coin-buyer",
+     "current": 1.0,
+     "previous": 0.0
+     }]}]
+ (map (remove 'module-hash) (env-events true)))
+
+(rollback-tx)
+
+(begin-tx "sale fixed-quote-policy-royalty success")
+(env-hash (hash "fixed-quote-policy-royalty-sale-tx2"))
+(use free.babena-ledger)
+
+(env-sigs
+ [{'key:'user
+  ,'caps:
+   [(free.babena-ledger.OFFER (read-msg 'token) "user" 1.0 120)]}
+])
+
+(env-data
+ {
+  "quote": {
+      "price": 10.0
+     ,"recipient": "user"
+     ,"recipient-guard": {"keys": ["user"], "pred":"keys-all"}
+   }
+ ,"buyer": "coin-buyer"
+ ,"buyer-guard": {"keys": ["buyer"], "pred": "keys-all"},
+ 'token: "Babena:OnaCvrAsM53g1QOVaAFkw6DcGpQ6vWYn6tBL8stUFSA"
+ })
+(env-chain-data {"block-height": 100})
+ (use free.babena-royalty-policy)
+(get-mint-status)
+(expect "Sale succeeds"
+ true
+ (sale (read-msg 'token) 'user 1.0 120))
+
+(expect "coin balance of coin-buyer is unchanged"
+ 12.0
+ (coin.get-balance 'coin-buyer))
+
+(expect "Buyer is credited, sale account is debited on Babena:OnaCvrAsM53g1QOVaAFkw6DcGpQ6vWYn6tBL8stUFSA balance"
+ [0.0 1.0]
+ (map (get-balance (read-msg 'token)) ['user (sale-account)]))
+
+(expect "OFFER events"
+  [{"name": "free.babena-ledger.OFFER","params": [(read-msg 'token) "user" 1.0 120]},
+   {"name": "free.babena-ledger.SALE","params": [(read-msg 'token) "user" 1.0 120 (pact-id)]},
+   {"name": "free.babena-royalty-policy.QUOTE","params": [(pact-id) (read-msg 'token) 1.0 10.0 10.0 1.000000000000 "creator" (read-msg "quote")]},
+   {"name": "free.babena-ledger.ACCOUNT_GUARD","params": [(read-msg 'token) (sale-account) (create-pact-guard "SALE")]},
+   {"name": "free.babena-ledger.TRANSFER","params": [(read-msg 'token) "user" (sale-account) 1.0]},
+   {"name": "free.babena-ledger.RECONCILE","params": [(read-msg 'token) 1.0
+   { "account": "user",
+     "current": 0.0,
+     "previous": 1.0
+   }  { "account": (sale-account),
+     "current": 1.0,
+     "previous": 0.0
+     }]}]
+ (map (remove 'module-hash) (env-events true)))
+
+
+(expect-failure "Withdraw fails before timeout"
+ "still active"
+ (continue-pact 0 true))
+
+(env-sigs [
+ {'key: 'user
+  ,'caps: [(free.babena-ledger.BUY (read-msg 'token) "user" "coin-buyer" 1.0 120 (hash "fixed-quote-policy-royalty-sale-tx2"))]
+ }
+,{'key: 'dummy
+,'caps: [
+  (coin.TRANSFER "coin-buyer" "user" 9.5)
+  (coin.TRANSFER "coin-buyer" "creator" 0.5)
+]}])
+
+(expect-failure "buy fails, buyer doesn't sign coin.TRANSFER"
+ "[buyer]"
+ (continue-pact 1))
+
+(env-sigs [
+ {'key: 'user
+  ,'caps: [(free.babena-ledger.BUY (read-msg 'token) "user" "coin-buyer" 1.0 120 (hash "fixed-quote-policy-royalty-sale-tx2"))]
+ }
+,{'key: 'buyer
+,'caps: [
+ (coin.TRANSFER "coin-buyer" "user" 9.0)
+ (coin.TRANSFER "coin-buyer" "creator" 1.0)
+ (free.babena-royalty-policy.BUY (read-msg 'token) "coin-buyer")
+]}])
+
+(map (coin.get-balance ) ['coin-buyer 'user 'creator])
+(env-chain-data {"block-height": 121})
+(expect-failure "buy expired"
+ "expired"
+ (continue-pact 1))
+(map (get-balance (read-msg 'token)) ['user (sale-account)])
+(expect "Withdraw success"
+  true
+  (continue-pact 0 true))
+
+(expect "Seller is credited, sale account is debited on Babena:OnaCvrAsM53g1QOVaAFkw6DcGpQ6vWYn6tBL8stUFSA balance"
+ [1.0 0.0]
+ (map (get-balance (read-msg 'token)) ['user (sale-account)]))
+
+(expect "OFFER events"
+  [{"name": "free.babena-ledger.WITHDRAW","params": [(read-msg 'token) "user" 1.0 120 (pact-id)]}
+   {"name": "free.babena-ledger.TRANSFER","params": [(read-msg 'token) (sale-account) "user" 1.0]}
+   {"name": "free.babena-ledger.RECONCILE","params": [(read-msg 'token) 1.0
+   { "account": (sale-account),
+     "current": 0.0,
+     "previous": 1.0
+   }  { "account": "user",
+     "current": 1.0,
+     "previous": 0.0
+     }]}]
+ (map (remove 'module-hash) (env-events true)))
+
+
+(rollback-tx)
+
+; Upgrade tests
+; (begin-tx "Upgrade contracts")
+; (env-sigs [
+;   { 'key: 'admin-demo
+;    ,'caps: []
+;    }])
+; (env-data {
+;   'ns: "free"
+;  ,'upgrade: true
+;   })
+; (load "ledger.pact")
+; (load "fixed-quote-policy.pact")
+; (load "fixed-quote-policy-royalty.pact")
+; (load "policy.pact")
+; (rollback-tx)

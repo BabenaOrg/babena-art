@@ -1,0 +1,13 @@
+codeFile: ../../kip/poly-fungible-v2.pact
+signers:
+  - public: f89ef46927f506c70b6a58fd322450a936311dc6ac91f4ec3d8ef949608dbf1f
+data:
+  upgrade: false
+networkId: development
+nonce: install poly-fungible-v2
+publicMeta:
+  chainId: "0"
+  sender: "k:f89ef46927f506c70b6a58fd322450a936311dc6ac91f4ec3d8ef949608dbf1f"
+  gasLimit: 100000
+  gasPrice: 0.0000001
+  ttl: 6000

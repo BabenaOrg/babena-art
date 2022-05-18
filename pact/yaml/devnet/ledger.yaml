@@ -1,0 +1,18 @@
+codeFile: ../../ledger.pact
+signers:
+  - public: f89ef46927f506c70b6a58fd322450a936311dc6ac91f4ec3d8ef949608dbf1f
+data:
+  upgrade: true
+  ns: free
+  babena-admin:
+    keys:
+      - f89ef46927f506c70b6a58fd322450a936311dc6ac91f4ec3d8ef949608dbf1f
+    pred: keys-all
+networkId: development
+nonce: update ledger
+publicMeta:
+  chainId: "0"
+  sender: "k:f89ef46927f506c70b6a58fd322450a936311dc6ac91f4ec3d8ef949608dbf1f"
+  gasLimit: 100000
+  gasPrice: 0.0000001
+  ttl: 6000
